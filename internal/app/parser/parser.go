@@ -9,8 +9,8 @@ import (
 	"golang.org/x/net/html"
 )
 
-func findCurrentLink(child *html.Node) {
-	reg, err := regexp.Compile(`/shop/.+[^=]$`)
+func findLink(child *html.Node, expr string) {
+	reg, err := regexp.Compile(expr)
 	if err != nil {
 		log.Fatalf("invalid regex: %s", err)
 	}
@@ -22,18 +22,22 @@ func findCurrentLink(child *html.Node) {
 			}
 		}
 	}
+}
+
+func findCurrentLink(child *html.Node) {
+	findLink(child, `/shop/.+[^=]$`)
 	for c := child.FirstChild; c != nil; c = c.NextSibling {
 		findCurrentLink(c)
 	}
 }
 
 func getItemLinks(node *html.Node) {
+	findLink(node, `\?page=\d+`)
 	if node.Type == html.ElementNode && node.Data == "div" {
 		for _, attr := range node.Attr {
 			if attr.Key == "class" &&
 				attr.Val == "row search_result_item displayToggleControlled " {
 				findCurrentLink(node)
-
 			}
 		}
 	}
