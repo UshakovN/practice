@@ -1,15 +1,49 @@
 package parser
 
+/*
 import (
 	"fmt"
 	"log"
 	"net/http"
 	"regexp"
+	"strconv"
+	"strings"
 
 	"golang.org/x/net/html"
 )
 
-func findLink(child *html.Node, expr string) {
+const (
+	itemExpr = `/shop/.+[^=]$`
+	pageExpr = `\?page=\d+`
+)
+
+var (
+	count  int    = 0
+	link   string = ""
+	buffer        = make([]string, 0)
+)
+
+func getPagesCount(node *html.Node) {
+	reg, err := regexp.Compile(pageExpr)
+	if err != nil {
+		log.Fatalf("invalid regex: %s", err)
+	}
+	getLink(node, pageExpr)
+	if reg.MatchString(link) {
+		buffer, err := strconv.Atoi(strings.ReplaceAll(link, `?page=`, ""))
+		if err != nil {
+			log.Fatalf("conversion error: %s", err)
+		}
+		if buffer > count {
+			count = buffer
+		}
+	}
+	for c := node.FirstChild; c != nil; c = c.NextSibling {
+		getPagesCount(c)
+	}
+}
+
+func getLink(child *html.Node, expr string) {
 	reg, err := regexp.Compile(expr)
 	if err != nil {
 		log.Fatalf("invalid regex: %s", err)
@@ -18,26 +52,28 @@ func findLink(child *html.Node, expr string) {
 		child.Data == "a" {
 		for _, childAttr := range child.Attr {
 			if childAttr.Key == "href" && reg.MatchString(childAttr.Val) {
-				fmt.Println(childAttr.Val)
+				link = childAttr.Val
 			}
 		}
 	}
 }
 
-func findCurrentLink(child *html.Node) {
-	findLink(child, `/shop/.+[^=]$`)
+func findItemLink(child *html.Node) {
+	getLink(child, itemExpr)
 	for c := child.FirstChild; c != nil; c = c.NextSibling {
-		findCurrentLink(c)
+		findItemLink(c)
 	}
 }
 
 func getItemLinks(node *html.Node) {
-	findLink(node, `\?page=\d+`)
 	if node.Type == html.ElementNode && node.Data == "div" {
 		for _, attr := range node.Attr {
 			if attr.Key == "class" &&
 				attr.Val == "row search_result_item displayToggleControlled " {
-				findCurrentLink(node)
+				findItemLink(node)
+				if link != "" {
+					buffer = append(buffer, link)
+				}
 			}
 		}
 	}
@@ -46,8 +82,8 @@ func getItemLinks(node *html.Node) {
 	}
 }
 
-func FisherSciencific(brandTag string) {
-	url := fmt.Sprintf("https://www.fishersci.com/us/en/brands/%s.html", brandTag)
+func getHtmlPage(brandTag string, pageNumber int) (*html.Node, error) {
+	url := fmt.Sprintf("https://www.fishersci.com/us/en/brands/%s.html?page=%d", brandTag, pageNumber)
 	resp, err := http.Get(url)
 	if err != nil {
 		log.Fatalf("uncorrect ulr: %s", err)
@@ -56,21 +92,30 @@ func FisherSciencific(brandTag string) {
 	if resp.StatusCode != http.StatusOK {
 		log.Fatalf("error status code: %d %s", resp.StatusCode, resp.Status)
 	}
-	/*
-		_, err = goquery.NewDocumentFromReader(resp.Body)
-		if err != nil {
-			log.Fatalf("unexpected error %s", err)
-		}
-		file, err := os.Create("buffer.html")
+	doc, err := html.Parse(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+func FisherSciencific(brandTag string) {
+	doc, err := getHtmlPage(brandTag, 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+	getPagesCount(doc)
+	fmt.Println(count)
+	for i := 1; i <= count; i++ {
+		doc, err = getHtmlPage(brandTag, i)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer file.Close()
-		io.Copy(file, resp.Body)
-	*/
-	doc, err := html.Parse(resp.Body)
-	if err != nil {
-		log.Fatalf("unexpected error %s", err)
+		getItemLinks(doc)
 	}
-	getItemLinks(doc)
+	for _, l := range buffer {
+		fmt.Println(l)
+	}
+	fmt.Println(len(buffer))
 }
+*/
