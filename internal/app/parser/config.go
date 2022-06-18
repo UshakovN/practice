@@ -1,7 +1,7 @@
 package parser
 
 type Data struct {
-	Price        float32
+	Price        float64
 	Label        string
 	Article      string
 	Description  string

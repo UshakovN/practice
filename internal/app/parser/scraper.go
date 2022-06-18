@@ -30,7 +30,7 @@ func getItemsUrl(doc *goquery.Document) ([]string, error) {
 			}
 		})
 	if len(buffer) == 0 {
-		return nil, errors.New("not found url")
+		return nil, errors.New("not found urls")
 	}
 	return buffer, nil
 }
@@ -69,64 +69,129 @@ func AllocateEmptySlice() [][]string {
 	return slice
 }
 
-func getItemData(doc *goquery.Document) (*Data, error) {
-	reg := regexp.MustCompile(`[[:^ascii:]]`)
-	selMain := doc.Find("div.product_description_wrapper>div.row>div.columns")
-
-	label := reg.ReplaceAllLiteralString(
-		strings.TrimSpace(
-			selMain.Find("h1").Contents().First().Text()), "")
-	if label == "" {
-		return nil, errors.New("label not found")
+func getItemData(doc *goquery.Document) (*Data, []string, error) {
+	// muiltiple item page
+	multipage := doc.Find("div.products_list")
+	if multipage.Nodes != nil {
+		buffer := make([]string, 0)
+		multipage.Find("tbody.itemRowContent").Each(
+			func(index int, item *goquery.Selection) {
+				url, exist := item.Find("a.chemical_fmly_glyph").Attr("href")
+				if exist {
+					buffer = append(buffer, url)
+				}
+			})
+		if len(buffer) == 0 {
+			return nil, nil, errors.New("not found urls")
+		}
+		return nil, buffer, nil
 	}
 
-	selDescAndMan := selMain.Find("div.subhead>p")
+	// default item page
+	reg := regexp.MustCompile(`[[:^ascii:]]`)
+	selMain := doc.Find("div.product_description_wrapper")
+
+	label := strings.ReplaceAll(
+		reg.ReplaceAllLiteralString(
+			strings.TrimSpace(
+				selMain.Find("h1").Contents().First().Text()), " "), "  ", " ")
+	if label == "" {
+		return nil, nil, errors.New("label not found")
+	}
+
+	selDescAndMan := selMain.Find("p")
 
 	descript := reg.ReplaceAllLiteralString(
 		strings.TrimSpace(
 			selDescAndMan.First().Contents().Text()), "")
 	if descript == "" {
-		return nil, errors.New("description not found")
+		return nil, nil, errors.New("description not found")
 	}
 
-	// need fix (manufacturer ?)
 	manufact := strings.ReplaceAll(
 		strings.TrimSpace(
 			reg.ReplaceAllLiteralString(
 				strings.ReplaceAll(
 					selDescAndMan.Next().Contents().Text(), "Manufacturer:", ""), "")), "  ", " ")
 	if manufact == "" {
-		return nil, errors.New("manufacturer not found")
+		return nil, nil, errors.New("manufacturer not found")
 	}
 
-	return nil, nil
+	selPriceAndArtc := selMain.Find("div.product_sku_options_block")
+
+	priceStr, exist := selPriceAndArtc.Find("label.price>span>span").Attr("content")
+	if !exist {
+		return nil, nil, errors.New("price is not available")
+	}
+	price, err := strconv.ParseFloat(priceStr, 64)
+	if err != nil {
+		return nil, nil, errors.New("invalid price")
+	}
+
+	artc := strings.TrimSpace(
+		selPriceAndArtc.Find("span.float_right").Contents().Text())
+	if artc == "" {
+		return nil, nil, errors.New("article not found")
+	}
+
+	data := Data{
+		Price:        price,
+		Label:        label,
+		Article:      artc,
+		Description:  descript,
+		Manufacturer: manufact,
+	}
+	return &data, nil, nil
+}
+
+func printItemData(data *Data) {
+	fmt.Printf("\nitem:\n%s\n%s\n%s\n%.2f\n\n",
+		data.Article, data.Label, data.Manufacturer, data.Price)
 }
 
 func FisherSciencific(brand string) {
-	doc, err := getPageDocument(brand, 0)
+	currentPageDoc, err := getPageDocument(brand, 0)
 	if err != nil {
 		log.Fatal(err)
 	}
-	pages, err := getPagesCount(doc)
+	pageCount, err := getPagesCount(currentPageDoc)
 	if err != nil {
 		log.Fatal(err)
 	}
-	for i := 1; i <= pages; i++ {
-		page, err := getPageDocument(brand, i)
+	for i := 1; i <= pageCount; i++ {
+		currentPageDoc, err = getPageDocument(brand, i)
 		if err != nil {
 			log.Fatal(err)
 		}
-		urls, err := getItemsUrl(page)
+		itemsUrl, err := getItemsUrl(currentPageDoc)
 		if err != nil {
 			log.Fatal(err)
 		}
-		for _, u := range urls {
-			fmt.Println(u)
+		for _, currentItemUrl := range itemsUrl {
+			currentItemDoc, err := getItemDocument(currentItemUrl)
+			if err != nil {
+				log.Fatal(err)
+			}
+			data, multipleItemsUrl, err := getItemData(currentItemDoc)
+			if err != nil {
+				log.Fatal(err)
+			}
+			if len(multipleItemsUrl) != 0 {
+				for _, internalItemUrl := range multipleItemsUrl {
+					internalItemDoc, err := getItemDocument(internalItemUrl)
+					if err != nil {
+						log.Fatal(err)
+					}
+					data, _, err = getItemData(internalItemDoc)
+					if err != nil {
+						log.Printf("\n%s\n", internalItemUrl)
+					}
+					printItemData(data)
+				}
+			} else {
+				printItemData(data)
+			}
 		}
-		item, err := getItemDocument(urls[0])
-		if err != nil {
-			log.Fatal(err)
-		}
-		getItemData(item)
+
 	}
 }

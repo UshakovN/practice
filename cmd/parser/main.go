@@ -13,5 +13,3 @@ func main() {
 	parser.FisherSciencific(tags[1])
 	fmt.Println(time.Since(start))
 }
-
-// ?page=2
