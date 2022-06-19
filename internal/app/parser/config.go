@@ -6,4 +6,5 @@ type Data struct {
 	Article      string
 	Description  string
 	Manufacturer string
+	Available    bool
 }
