@@ -1,15 +1,19 @@
 package parser
 
 import (
+	// "encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
+	neturl "net/url"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	json "github.com/buger/jsonparser"
 )
 
 func getPagesCount(doc *goquery.Document) (int, error) {
@@ -69,54 +73,122 @@ func AllocateEmptySlice() [][]string {
 	return slice
 }
 
+func getItemPriceFromAPI(itemArtc string) (float64, error) {
+	url := "https://www.fishersci.com/shop/products/service/pricing"
+	resp, err := http.PostForm(url, neturl.Values{"partNumber": {itemArtc}})
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	priceStr, err := json.GetString(body, "priceAndAvailability", itemArtc, "[0]", "price")
+	if err != nil {
+		return 0, err
+	}
+	price, err := strconv.ParseFloat(strings.ReplaceAll(priceStr, `$`, ""), 64)
+	if err != nil {
+		return 0, err
+	}
+	/*
+		priceStruct := Price{}
+		err = json.Unmarshal(body, &priceStruct)
+		if err != nil {
+			return "", err
+		}
+			price := priceStruct.PriceAndAvailability.PartNumber[0].Price
+			if price == "" {
+				return "", errors.New("internal error")
+			}
+	*/
+	return price, nil
+}
+
 // (secondary)
 func getSingleItemData(doc *goquery.Document) (*Data, error) {
 	available := true
+	selMain := doc.Find("div.productSelectors")
 
 	reg := regexp.MustCompile(`[[:^ascii:]]`)
-	label := reg.ReplaceAllLiteralString(
-		doc.Find("div.productSelectors>h1").Contents().First().Text(), "")
+
+	label := strings.ReplaceAll(
+		reg.ReplaceAllLiteralString(
+			strings.TrimSpace(
+				selMain.Find("h1").Contents().First().Text()), " "), "  ", " ")
 	if label == "" {
 		return nil, errors.New("label not found")
 	}
 
 	descript := "none"
-	selManAndArt := doc.Find("div.block_head>p")
+	artc, exist := selMain.Find("div.glyphs_html_container").Attr("data-partnumber")
+	if !exist {
+		return nil, errors.New("internal error")
+	}
 
-	manufact := reg.ReplaceAllLiteralString(
-		selManAndArt.Last().Contents().Text(), "")
-
-	// not found - idk
-	fmt.Println(doc.Find("div.block_head").Nodes)
-
+	manufact := ""
+	doc.Find(".spec_table").Find("tr").EachWithBreak(
+		func(index int, item *goquery.Selection) bool {
+			td := item.Find("td.bold")
+			if td.Contents().Text() == "Product Line" {
+				manufact = strings.TrimSpace(
+					reg.ReplaceAllLiteralString(
+						td.Parent().Find("td").Last().Contents().Text(), ""))
+				return false
+			}
+			return true
+		})
 	if manufact == "" {
 		return nil, errors.New("manufacturer not found")
 	}
+	manufact = strings.Join([]string{manufact, artc}, " ")
 
-	priceStr := reg.ReplaceAllLiteralString(
-		doc.Find("div.block_body>span.qa_single_price>b").Contents().Text(), "")
-	if priceStr == "" {
-		priceStr = "0"
+	price, err := getItemPriceFromAPI(artc)
+	if err != nil {
+		price = 0
 		available = false
 	}
+	/*
+		selManAndArt := doc.Find("div.block_head>p")
 
-	price, err := strconv.ParseFloat(priceStr, 64)
-	if err != nil {
-		return nil, errors.New("invalid price")
-	}
+		manufact := reg.ReplaceAllLiteralString(
+			selManAndArt.Last().Contents().Text(), "")
 
-	artc := reg.ReplaceAllLiteralString(
-		selManAndArt.First().Contents().Text(), "")
-	if artc == "" {
-		return nil, errors.New("article not found")
-	}
+		fmt.Println(doc.Html())
 
+		// not found - idk
+		fmt.Println(doc.Find("div.block_head").Nodes)
+
+		if manufact == "" {
+			return nil, errors.New("manufacturer not found")
+		}
+
+		priceStr := reg.ReplaceAllLiteralString(
+			doc.Find("div.block_body>span.qa_single_price>b").Contents().Text(), "")
+		if priceStr == "" {
+			priceStr = "0"
+			available = false
+		}
+
+		price, err := strconv.ParseFloat(priceStr, 64)
+		if err != nil {
+			return nil, errors.New("invalid price")
+		}
+
+		artc := reg.ReplaceAllLiteralString(
+			selManAndArt.First().Contents().Text(), "")
+		if artc == "" {
+			return nil, errors.New("article not found")
+		}
+
+	*/
 	data := Data{
 		Price:        price,
 		Label:        label,
 		Article:      artc,
 		Description:  descript,
-		Manufacturer: "manufact",
+		Manufacturer: manufact,
 		Available:    available,
 	}
 	return &data, nil

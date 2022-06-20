@@ -8,3 +8,11 @@ type Data struct {
 	Manufacturer string
 	Available    bool
 }
+
+type Price struct {
+	PriceAndAvailability struct {
+		PartNumber []struct {
+			Price string `json:"price"`
+		} `json:"A1098801"` // variable
+	} `json:"priceAndAvailability"`
+}
