@@ -302,64 +302,65 @@ func printItemData(data *Data) {
 }
 
 func FisherSciencific(brand string) {
-	// "/shop/products/gibco-bottle-weight/A1098801#?keyword=gibco%20bottle"
-	// "/shop/products/algimatrix-96-well-3d-culture-system-flat-bottom-microplate-1/12684031"
-	debugUrl := "/shop/products/gibco-bottle-weight/A1098801#?keyword=gibco%20bottle"
-	debugItemDoc, err := getItemDocument(debugUrl)
-	if err != nil {
-		log.Fatal(err)
-	}
-	data, _, err := getItemData(debugItemDoc)
-	if err != nil {
-		log.Fatal(err)
-	}
-	printItemData(data)
-
 	/*
-		currentPageDoc, err := getPageDocument(brand, 0)
+		// "/shop/products/gibco-bottle-weight/A1098801#?keyword=gibco%20bottle"
+		// "/shop/products/algimatrix-96-well-3d-culture-system-flat-bottom-microplate-1/12684031"
+		debugUrl := "/shop/products/gibco-bottle-weight/A1098801#?keyword=gibco%20bottle"
+		debugItemDoc, err := getItemDocument(debugUrl)
 		if err != nil {
 			log.Fatal(err)
 		}
-		pageCount, err := getPagesCount(currentPageDoc)
+		data, _, err := getItemData(debugItemDoc)
 		if err != nil {
 			log.Fatal(err)
 		}
-		for i := 1; i <= pageCount; i++ {
-			currentPageDoc, err = getPageDocument(brand, i)
+		printItemData(data)
+	*/
+
+	currentPageDoc, err := getPageDocument(brand, 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+	pageCount, err := getPagesCount(currentPageDoc)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for i := 1; i <= pageCount; i++ {
+		currentPageDoc, err = getPageDocument(brand, i)
+		if err != nil {
+			log.Fatal(err)
+		}
+		itemsUrl, err := getItemsUrl(currentPageDoc)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, currentItemUrl := range itemsUrl {
+			currentItemDoc, err := getItemDocument(currentItemUrl)
 			if err != nil {
 				log.Fatal(err)
 			}
-			itemsUrl, err := getItemsUrl(currentPageDoc)
+			fmt.Println(currentItemUrl) // debug
+			data, multipleItemsUrl, err := getItemData(currentItemDoc)
 			if err != nil {
 				log.Fatal(err)
 			}
-			for _, currentItemUrl := range itemsUrl {
-				currentItemDoc, err := getItemDocument(currentItemUrl)
-				if err != nil {
-					log.Fatal(err)
-				}
-				fmt.Println(currentItemUrl) // debug
-				data, multipleItemsUrl, err := getItemData(currentItemDoc)
-				if err != nil {
-					log.Fatal(err)
-				}
-				if len(multipleItemsUrl) != 0 {
-					for _, internalItemUrl := range multipleItemsUrl {
-						internalItemDoc, err := getItemDocument(internalItemUrl)
-						if err != nil {
-							log.Fatal(err)
-						}
-						fmt.Println(internalItemUrl) // debug
-						data, _, err = getItemData(internalItemDoc)
-						if err != nil {
-							log.Fatal(err)
-						}
-						printItemData(data) // out
+			if len(multipleItemsUrl) != 0 {
+				for _, internalItemUrl := range multipleItemsUrl {
+					internalItemDoc, err := getItemDocument(internalItemUrl)
+					if err != nil {
+						log.Fatal(err)
 					}
-				} else {
+					fmt.Println(internalItemUrl) // debug
+					data, _, err = getItemData(internalItemDoc)
+					if err != nil {
+						log.Fatal(err)
+					}
 					printItemData(data) // out
 				}
+			} else {
+				printItemData(data) // out
 			}
 		}
-	*/
+	}
+
 }
