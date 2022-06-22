@@ -297,8 +297,8 @@ func getItemData(doc *goquery.Document) (*Data, []string, error) {
 }
 
 func printItemData(data *Data) {
-	fmt.Printf("\nitem:\n%s\n%s\n%s\n%.2f\n\n",
-		data.Article, data.Label, data.Manufacturer, data.Price)
+	fmt.Printf("\nitem:\n%s\n%s\n%s\n%.2f\n%t\n\n",
+		data.Article, data.Label, data.Manufacturer, data.Price, data.Available)
 }
 
 func FisherSciencific(brand string) {
