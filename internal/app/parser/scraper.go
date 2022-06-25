@@ -1,7 +1,7 @@
 package parser
 
 import (
-	// "encoding/json"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -11,12 +11,31 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	json "github.com/buger/jsonparser"
+	"github.com/buger/jsonparser"
 )
 
-func getPagesCount(doc *goquery.Document) (int, error) {
+func PrettyPrint(data interface{}) {
+	pb, err := json.MarshalIndent(data, "", "\t")
+	if err != nil {
+		fmt.Print(err)
+	}
+	fmt.Printf("%s\n\n", pb)
+}
+
+type Parser struct {
+	Brand string
+}
+
+func NewParser(brand string) *Parser {
+	return &Parser{
+		Brand: brand,
+	}
+}
+
+func (parser *Parser) getPagesCount(doc *goquery.Document) (int, error) {
 	pages, exist := doc.Find("li.hide_in_mobile").Last().Find("a").Attr("href")
 	if !exist {
 		return 0, errors.New("not found pages")
@@ -24,7 +43,7 @@ func getPagesCount(doc *goquery.Document) (int, error) {
 	return strconv.Atoi(strings.Trim(strings.TrimSpace(pages), `?page=`))
 }
 
-func getItemsUrl(doc *goquery.Document) ([]string, error) {
+func (parser *Parser) getItemsUrl(doc *goquery.Document) ([]string, error) {
 	buffer := make([]string, 0)
 	doc.Find("div.search_results>div.search_results_listing>div.row").Each(
 		func(index int, item *goquery.Selection) {
@@ -39,24 +58,35 @@ func getItemsUrl(doc *goquery.Document) ([]string, error) {
 	return buffer, nil
 }
 
-func getPageDocument(brand string, page int) (*goquery.Document, error) {
+func (parser *Parser) getPageDocument(brand string, page int) (*goquery.Document, error) {
 	url := fmt.Sprintf("https://www.fishersci.com/us/en/brands/%s.html?page=%d", brand, page)
-	return getHtmlDocument(url)
+	return parser.getHtmlDocument(url)
 }
 
-func getItemDocument(item string) (*goquery.Document, error) {
+func (parser *Parser) getItemDocument(item string) (*goquery.Document, error) {
 	url := fmt.Sprintf("https://www.fishersci.com%s", item)
-	return getHtmlDocument(url)
+	return parser.getHtmlDocument(url)
 }
 
-func getHtmlDocument(url string) (*goquery.Document, error) {
+func (parser *Parser) getHtmlDocument(url string) (*goquery.Document, error) {
+	/*
+		proxy, err := neturl.Parse("http://user:pass@ip:port")
+		if err != nil {
+			return nil, err
+		}
+		client := &http.Client{
+			Transport: &http.Transport{
+				Proxy: http.ProxyURL(proxy),
+			},
+		}
+	*/
 	resp, err := http.Get(url)
 	if err != nil {
-		log.Fatalf("uncorrect ulr: %s", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		log.Fatalf("error status code: %d %s", resp.StatusCode, resp.Status)
+		return nil, fmt.Errorf("error status code: %d %s", resp.StatusCode, resp.Status)
 	}
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
@@ -65,15 +95,11 @@ func getHtmlDocument(url string) (*goquery.Document, error) {
 	return doc, nil
 }
 
-func AllocateEmptySlice() [][]string {
-	slice := make([][]string, 0)
-	for i := range slice {
-		slice[i] = make([]string, 0)
-	}
-	return slice
+func getCurrentTimeUTC() time.Time {
+	return time.Now().UTC()
 }
 
-func getItemPriceFromAPI(itemArtc string) (float64, error) {
+func (parser *Parser) getItemPriceFromAPI(itemArtc string) (float64, error) {
 	url := "https://www.fishersci.com/shop/products/service/pricing"
 	resp, err := http.PostForm(url, neturl.Values{"partNumber": {itemArtc}})
 	if err != nil {
@@ -84,7 +110,7 @@ func getItemPriceFromAPI(itemArtc string) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	priceStr, err := json.GetString(body, "priceAndAvailability", itemArtc, "[0]", "price")
+	priceStr, err := jsonparser.GetString(body, "priceAndAvailability", itemArtc, "[0]", "price")
 	if err != nil {
 		return 0, err
 	}
@@ -107,7 +133,7 @@ func getItemPriceFromAPI(itemArtc string) (float64, error) {
 }
 
 // (secondary)
-func getSingleItemData(doc *goquery.Document) (*Data, error) {
+func (parser *Parser) getSingleItemData(doc *goquery.Document) (*ItemData, error) {
 	available := true
 	selMain := doc.Find("div.productSelectors")
 
@@ -144,7 +170,7 @@ func getSingleItemData(doc *goquery.Document) (*Data, error) {
 	}
 	manufact = strings.Join([]string{manufact, artc}, " ")
 
-	price, err := getItemPriceFromAPI(artc)
+	price, err := parser.getItemPriceFromAPI(artc)
 	if err != nil {
 		price = 0
 		available = false
@@ -183,18 +209,23 @@ func getSingleItemData(doc *goquery.Document) (*Data, error) {
 		}
 
 	*/
-	data := Data{
-		Price:        price,
-		Label:        label,
-		Article:      artc,
-		Description:  descript,
-		Manufacturer: manufact,
-		Available:    available,
+	created := getCurrentTimeUTC()
+	data := &ItemData{
+		Brand:   parser.Brand,
+		Article: artc,
+		Info: Info{
+			Label:        label,
+			Description:  descript,
+			Manufacturer: manufact,
+			Price:        price,
+			Available:    available,
+			CreatedAt:    created,
+		},
 	}
-	return &data, nil
+	return data, nil
 }
 
-func getItemData(doc *goquery.Document) (*Data, []string, error) {
+func (parser *Parser) getItemData(doc *goquery.Document) (*ItemData, []string, error) {
 	// in stock
 	available := true
 
@@ -218,7 +249,7 @@ func getItemData(doc *goquery.Document) (*Data, []string, error) {
 	// single (secondary) item
 	singlepage := doc.Find("div.productSelectors") // ?
 	if singlepage.Nodes != nil {
-		data, err := getSingleItemData(doc)
+		data, err := parser.getSingleItemData(doc)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -285,82 +316,122 @@ func getItemData(doc *goquery.Document) (*Data, []string, error) {
 		return nil, nil, errors.New("article not found")
 	}
 
-	data := Data{
-		Price:        price,
-		Label:        label,
-		Article:      artc,
-		Description:  descript,
-		Manufacturer: manufact,
-		Available:    available,
+	created := getCurrentTimeUTC()
+	data := &ItemData{
+		Brand:   parser.Brand,
+		Article: artc,
+		Info: Info{
+			Label:        label,
+			Description:  descript,
+			Manufacturer: manufact,
+			Price:        price,
+			Available:    available,
+			CreatedAt:    created,
+		},
 	}
-	return &data, nil, nil
+	return data, nil, nil
 }
 
-func printItemData(data *Data) {
-	fmt.Printf("\nitem:\n%s\n%s\n%s\n%.2f\n%t\n\n",
-		data.Article, data.Label, data.Manufacturer, data.Price, data.Available)
-}
-
-func FisherSciencific(brand string) {
-	/*
-		// "/shop/products/gibco-bottle-weight/A1098801#?keyword=gibco%20bottle"
-		// "/shop/products/algimatrix-96-well-3d-culture-system-flat-bottom-microplate-1/12684031"
-		debugUrl := "/shop/products/gibco-bottle-weight/A1098801#?keyword=gibco%20bottle"
-		debugItemDoc, err := getItemDocument(debugUrl)
-		if err != nil {
-			log.Fatal(err)
-		}
-		data, _, err := getItemData(debugItemDoc)
-		if err != nil {
-			log.Fatal(err)
-		}
-		printItemData(data)
-	*/
-
-	currentPageDoc, err := getPageDocument(brand, 0)
+func (parser *Parser) FisherSciencific() {
+	currentPageDoc, err := parser.getPageDocument(parser.Brand, 0)
 	if err != nil {
 		log.Fatal(err)
 	}
-	pageCount, err := getPagesCount(currentPageDoc)
+	pageCount, err := parser.getPagesCount(currentPageDoc)
 	if err != nil {
 		log.Fatal(err)
 	}
-	for i := 1; i <= pageCount; i++ {
-		currentPageDoc, err = getPageDocument(brand, i)
-		if err != nil {
-			log.Fatal(err)
-		}
-		itemsUrl, err := getItemsUrl(currentPageDoc)
-		if err != nil {
-			log.Fatal(err)
-		}
-		for _, currentItemUrl := range itemsUrl {
-			currentItemDoc, err := getItemDocument(currentItemUrl)
-			if err != nil {
-				log.Fatal(err)
-			}
-			fmt.Println(currentItemUrl) // debug
-			data, multipleItemsUrl, err := getItemData(currentItemDoc)
-			if err != nil {
-				log.Fatal(err)
-			}
-			if len(multipleItemsUrl) != 0 {
-				for _, internalItemUrl := range multipleItemsUrl {
-					internalItemDoc, err := getItemDocument(internalItemUrl)
-					if err != nil {
-						log.Fatal(err)
-					}
-					fmt.Println(internalItemUrl) // debug
-					data, _, err = getItemData(internalItemDoc)
-					if err != nil {
-						log.Fatal(err)
-					}
-					printItemData(data) // out
+	chanPagesDoc := make(chan *goquery.Document, pageCount)
+	chanErr := make(chan error)
+	defer close(chanPagesDoc)
+	go func() {
+		for i := 1; i <= pageCount; i++ {
+			go func(num int) {
+				currentPageDoc, err := parser.getPageDocument(parser.Brand, num)
+				if err != nil {
+					chanErr <- err
+					return
 				}
-			} else {
-				printItemData(data) // out
-			}
+				chanPagesDoc <- currentPageDoc
+			}(i)
 		}
+	}()
+	chanItemsUrl := make(chan []string, pageCount)
+	defer close(chanItemsUrl)
+	go func() {
+		for pagesDoc := range chanPagesDoc {
+			go func(doc *goquery.Document) {
+				itemsUrl, err := parser.getItemsUrl(doc)
+				if err != nil {
+					chanErr <- err
+					return
+				}
+				chanItemsUrl <- itemsUrl
+			}(pagesDoc)
+		}
+	}()
+	chanItemsDoc := make(chan *goquery.Document, 30)
+	go func() {
+		for itemsUrl := range chanItemsUrl {
+			go func(urls []string) {
+				for _, currentItemUrl := range urls {
+					currentItemDoc, err := parser.getItemDocument(currentItemUrl)
+					if err != nil {
+						chanErr <- err
+						return
+					}
+					chanItemsDoc <- currentItemDoc
+				}
+			}(itemsUrl)
+		}
+	}()
+	chanItemsData := make(chan *ItemData, 30)
+	chanInternalUrls := make(chan []string, 30)
+	go func() {
+		for itemDoc := range chanItemsDoc {
+			go func(doc *goquery.Document) {
+				data, multipleItemsUrl, err := parser.getItemData(doc)
+				if err != nil {
+					chanErr <- err
+					return
+				}
+				if len(multipleItemsUrl) != 0 {
+					chanInternalUrls <- multipleItemsUrl
+				} else {
+					chanItemsData <- data
+				}
+			}(itemDoc)
+		}
+	}()
+	chanInternalDocs := make(chan *goquery.Document, 30)
+	go func() {
+		for internalUrls := range chanInternalUrls {
+			go func(urls []string) {
+				for _, internalItemUrl := range urls {
+					internalItemDoc, err := parser.getItemDocument(internalItemUrl)
+					if err != nil {
+						chanErr <- err
+						return
+					}
+					chanInternalDocs <- internalItemDoc
+				}
+			}(internalUrls)
+		}
+	}()
+	go func() {
+		for internalDoc := range chanInternalDocs {
+			go func(doc *goquery.Document) {
+				data, _, err := parser.getItemData(doc)
+				if err != nil {
+					chanErr <- err
+					return
+				}
+				chanItemsData <- data
+			}(internalDoc)
+		}
+	}()
+	defer close(chanErr)
+	for itemData := range chanItemsData {
+		PrettyPrint(itemData)
 	}
-
 }
