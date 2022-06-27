@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -14,24 +13,26 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/buger/jsonparser"
+	"github.com/UshakovN/practice/internal/app/common"
+	"github.com/UshakovN/practice/internal/app/store"
+	json "github.com/buger/jsonparser"
 )
 
-func PrettyPrint(data interface{}) {
-	pb, err := json.MarshalIndent(data, "", "\t")
-	if err != nil {
-		fmt.Print(err)
-	}
-	fmt.Printf("%s\n\n", pb)
-}
-
 type Parser struct {
-	Brand string
+	Brand Brand
 }
 
-func NewParser(brand string) *Parser {
+type Brand struct {
+	Name string
+	Code string
+}
+
+func NewParser(brand Brand) *Parser {
 	return &Parser{
-		Brand: brand,
+		Brand: Brand{
+			Name: brand.Name,
+			Code: brand.Code,
+		},
 	}
 }
 
@@ -58,8 +59,9 @@ func (parser *Parser) getItemsUrl(doc *goquery.Document) ([]string, error) {
 	return buffer, nil
 }
 
-func (parser *Parser) getPageDocument(brand string, page int) (*goquery.Document, error) {
-	url := fmt.Sprintf("https://www.fishersci.com/us/en/brands/%s.html?page=%d", brand, page)
+func (parser *Parser) getPageDocument(brand Brand, page int) (*goquery.Document, error) {
+	url := fmt.Sprintf("https://www.fishersci.com/us/en/brands/%s/%s.html?page=%d",
+		brand.Code, brand.Name, page)
 	return parser.getHtmlDocument(url)
 }
 
@@ -95,8 +97,8 @@ func (parser *Parser) getHtmlDocument(url string) (*goquery.Document, error) {
 	return doc, nil
 }
 
-func getCurrentTimeUTC() time.Time {
-	return time.Now().UTC()
+func getCurrentTimeUTC() string {
+	return time.Now().UTC().String()
 }
 
 func (parser *Parser) getItemPriceFromAPI(itemArtc string) (float64, error) {
@@ -110,7 +112,7 @@ func (parser *Parser) getItemPriceFromAPI(itemArtc string) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	priceStr, err := jsonparser.GetString(body, "priceAndAvailability", itemArtc, "[0]", "price")
+	priceStr, err := json.GetString(body, "priceAndAvailability", itemArtc, "[0]", "price")
 	if err != nil {
 		return 0, err
 	}
@@ -133,7 +135,7 @@ func (parser *Parser) getItemPriceFromAPI(itemArtc string) (float64, error) {
 }
 
 // (secondary)
-func (parser *Parser) getSingleItemData(doc *goquery.Document) (*ItemData, error) {
+func (parser *Parser) getSingleItemData(doc *goquery.Document) (*store.ItemData, error) {
 	available := true
 	selMain := doc.Find("div.productSelectors")
 
@@ -147,7 +149,7 @@ func (parser *Parser) getSingleItemData(doc *goquery.Document) (*ItemData, error
 		return nil, errors.New("label not found")
 	}
 
-	descript := "none"
+	descript := "None"
 	artc, exist := selMain.Find("div.glyphs_html_container").Attr("data-partnumber")
 	if !exist {
 		return nil, errors.New("internal error")
@@ -210,10 +212,10 @@ func (parser *Parser) getSingleItemData(doc *goquery.Document) (*ItemData, error
 
 	*/
 	created := getCurrentTimeUTC()
-	data := &ItemData{
-		Brand:   parser.Brand,
+	data := &store.ItemData{
+		Brand:   strings.Title(parser.Brand.Name),
 		Article: artc,
-		Info: Info{
+		Info: store.Info{
 			Label:        label,
 			Description:  descript,
 			Manufacturer: manufact,
@@ -225,7 +227,7 @@ func (parser *Parser) getSingleItemData(doc *goquery.Document) (*ItemData, error
 	return data, nil
 }
 
-func (parser *Parser) getItemData(doc *goquery.Document) (*ItemData, []string, error) {
+func (parser *Parser) getItemData(doc *goquery.Document) (*store.ItemData, []string, error) {
 	// in stock
 	available := true
 
@@ -317,10 +319,10 @@ func (parser *Parser) getItemData(doc *goquery.Document) (*ItemData, []string, e
 	}
 
 	created := getCurrentTimeUTC()
-	data := &ItemData{
-		Brand:   parser.Brand,
+	data := &store.ItemData{
+		Brand:   strings.Title(parser.Brand.Name),
 		Article: artc,
-		Info: Info{
+		Info: store.Info{
 			Label:        label,
 			Description:  descript,
 			Manufacturer: manufact,
@@ -332,7 +334,7 @@ func (parser *Parser) getItemData(doc *goquery.Document) (*ItemData, []string, e
 	return data, nil, nil
 }
 
-func (parser *Parser) FisherSciencific() {
+func (parser *Parser) FisherSciencific(client *store.Client) {
 	currentPageDoc, err := parser.getPageDocument(parser.Brand, 0)
 	if err != nil {
 		log.Fatal(err)
@@ -342,8 +344,9 @@ func (parser *Parser) FisherSciencific() {
 		log.Fatal(err)
 	}
 	chanPagesDoc := make(chan *goquery.Document, pageCount)
-	chanErr := make(chan error)
 	defer close(chanPagesDoc)
+	chanErr := make(chan error)
+	defer close(chanErr)
 	go func() {
 		for i := 1; i <= pageCount; i++ {
 			go func(num int) {
@@ -371,6 +374,7 @@ func (parser *Parser) FisherSciencific() {
 		}
 	}()
 	chanItemsDoc := make(chan *goquery.Document, 30)
+	defer close(chanItemsDoc)
 	go func() {
 		for itemsUrl := range chanItemsUrl {
 			go func(urls []string) {
@@ -385,8 +389,10 @@ func (parser *Parser) FisherSciencific() {
 			}(itemsUrl)
 		}
 	}()
-	chanItemsData := make(chan *ItemData, 30)
+	chanItemsData := make(chan *store.ItemData, 30)
+	defer close(chanItemsData)
 	chanInternalUrls := make(chan []string, 30)
+	defer close(chanInternalUrls)
 	go func() {
 		for itemDoc := range chanItemsDoc {
 			go func(doc *goquery.Document) {
@@ -404,6 +410,7 @@ func (parser *Parser) FisherSciencific() {
 		}
 	}()
 	chanInternalDocs := make(chan *goquery.Document, 30)
+	defer close(chanInternalDocs)
 	go func() {
 		for internalUrls := range chanInternalUrls {
 			go func(urls []string) {
@@ -430,8 +437,17 @@ func (parser *Parser) FisherSciencific() {
 			}(internalDoc)
 		}
 	}()
-	defer close(chanErr)
-	for itemData := range chanItemsData {
-		PrettyPrint(itemData)
+	// form items batch
+	itemsBatch := make([]*store.ItemData, 0)
+	for {
+		for i := 0; i < 10 || len(chanItemsData) != 0; i++ {
+			itemsBatch = append(itemsBatch, <-chanItemsData)
+		}
+		if err := client.WriteBatch(itemsBatch); err != nil {
+			chanErr <- err
+			return
+		}
+		// console out
+		common.PrettyPrint(itemsBatch)
 	}
 }

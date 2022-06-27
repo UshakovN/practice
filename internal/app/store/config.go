@@ -8,8 +8,29 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 )
 
+type ItemKey struct {
+	Brand   string `dynamodbav:"brand"`
+	Article string `dynamodbav:"id"`
+}
+
+type ItemData struct {
+	Brand   string `dynamodbav:"brand"`
+	Article string `dynamodbav:"id"`
+	Info    Info   `dynamodbav:"info"`
+}
+
+type Info struct {
+	Label        string  `dynamodbav:"label"`
+	Description  string  `dynamodbav:"descpition"`
+	Manufacturer string  `dynamodbav:"manufacturer"`
+	Price        float64 `dynamodbav:"price"`
+	Available    bool    `dynamodbav:"available"`
+	CreatedAt    string  `dynamodbav:"created"`
+}
+
 type Config struct {
-	aws aws.Config
+	aws   aws.Config
+	table *string
 }
 
 func NewConfig() *Config {
@@ -21,8 +42,8 @@ func NewConfig() *Config {
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	return &Config{
-		aws: awsConfig,
+		aws:   awsConfig,
+		table: aws.String("fishersci_items"),
 	}
 }
