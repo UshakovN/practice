@@ -14,18 +14,14 @@ type ItemKey struct {
 }
 
 type ItemData struct {
-	Brand   string `dynamodbav:"brand"`
-	Article string `dynamodbav:"id"`
-	Info    Info   `dynamodbav:"info"`
-}
-
-type Info struct {
-	Label        string  `dynamodbav:"label"`
-	Description  string  `dynamodbav:"descpition"`
-	Manufacturer string  `dynamodbav:"manufacturer"`
+	Brand        string  `dynamodbav:"brand"`
+	Article      string  `dynamodbav:"id"`
+	Label        string  `dynamodbav:"item_name"`
+	Description  string  `dynamodbav:"item_description"`
+	Manufacturer string  `dynamodbav:"brand_description"`
 	Price        float64 `dynamodbav:"price"`
 	Available    bool    `dynamodbav:"available"`
-	CreatedAt    string  `dynamodbav:"created"`
+	CreatedAt    string  `dynamodbav:"created_at"`
 }
 
 type Config struct {

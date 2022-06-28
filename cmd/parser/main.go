@@ -11,22 +11,21 @@ import (
 func main() {
 	/*
 		// mock key
-		_ = &parser.ItemKey{
+		_ = &store.ItemKey{
 			Brand:   "Gibco",
 			Article: "PSC2014",
 		}
 		// mock item
-		item := &parser.ItemData{
+		_ = &store.ItemData{
 			Brand:   "Gibco",
 			Article: "PSC2014",
-			Info: parser.Info{
-				Label:        "Gibco GM-CSF Recombinant Swine Protein",
-				Description:  "None",
-				Manufacturer: "Gibco PSC2014",
-				Price:        100,
-				Available:    true,
-				CreatedAt:    time.Now().UTC().String(),
-			},
+
+			Label:        "Gibco GM-CSF Recombinant Swine Protein",
+			Description:  "None",
+			Manufacturer: "Gibco PSC2014",
+			Price:        100,
+			Available:    true,
+			CreatedAt:    time.Now().UTC().String(),
 		}
 	*/
 	storeCfg := store.NewConfig()
@@ -41,9 +40,31 @@ func main() {
 		{
 			Name: "gibco",
 			Code: "IIAM3NW4",
-		}}
+		},
+		{
+			Name: "abbott-laboratories",
+			Code: "I9C8LPZ9",
+		},
+		{
+			Name: "buchi",
+			Code: "I9C8LSEC",
+		},
+		{
+			Name: "dwk-life-sciences",
+			Code: "K8HKQ3DV",
+		},
+	}
+	newParser := parser.NewParser(brandTags[4])
 
-	newParser := parser.NewParser(brandTags[1])
+	/*
+		if _, err := newParser.GetHtmlDocument("https://example.com/"); err != nil {
+			log.Fatal(err)
+		}
+	*/
+
 	newParser.FisherSciencific(storeClient)
+
+	// newParser.Test(storeClient)
+
 	fmt.Println(time.Since(timeStart))
 }

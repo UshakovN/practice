@@ -37,7 +37,9 @@ func NewParser(brand Brand) *Parser {
 }
 
 func (parser *Parser) getPagesCount(doc *goquery.Document) (int, error) {
-	pages, exist := doc.Find("li.hide_in_mobile").Last().Find("a").Attr("href")
+	pages, exist := doc.Find("div.node-pagination").
+		Find("li").Last().Prev().Find("a").Attr("href")
+	// doc.Find("li.hide_in_mobile").Last().Find("a").Attr("href")
 	if !exist {
 		return 0, errors.New("not found pages")
 	}
@@ -46,7 +48,7 @@ func (parser *Parser) getPagesCount(doc *goquery.Document) (int, error) {
 
 func (parser *Parser) getItemsUrl(doc *goquery.Document) ([]string, error) {
 	buffer := make([]string, 0)
-	doc.Find("div.search_results>div.search_results_listing>div.row").Each(
+	doc.Find("div.search_results>div.search_results_listing>div.row.search_result_item").Each(
 		func(index int, item *goquery.Selection) {
 			url, exist := item.Find("div.columns>div.block>a").Attr("href")
 			if exist {
@@ -54,7 +56,7 @@ func (parser *Parser) getItemsUrl(doc *goquery.Document) ([]string, error) {
 			}
 		})
 	if len(buffer) == 0 {
-		return nil, errors.New("not found urls")
+		return nil, errors.New("not found urls") // DEBUG
 	}
 	return buffer, nil
 }
@@ -62,24 +64,19 @@ func (parser *Parser) getItemsUrl(doc *goquery.Document) ([]string, error) {
 func (parser *Parser) getPageDocument(brand Brand, page int) (*goquery.Document, error) {
 	url := fmt.Sprintf("https://www.fishersci.com/us/en/brands/%s/%s.html?page=%d",
 		brand.Code, brand.Name, page)
-	return parser.getHtmlDocument(url)
+	return parser.GetHtmlDocument(url)
 }
 
 func (parser *Parser) getItemDocument(item string) (*goquery.Document, error) {
 	url := fmt.Sprintf("https://www.fishersci.com%s", item)
-	return parser.getHtmlDocument(url)
+	return parser.GetHtmlDocument(url)
 }
 
-func (parser *Parser) getHtmlDocument(url string) (*goquery.Document, error) {
+func (parser *Parser) GetHtmlDocument(url string) (*goquery.Document, error) {
 	/*
-		proxy, err := neturl.Parse("http://user:pass@ip:port")
-		if err != nil {
-			return nil, err
-		}
+		zyte := proxy.NewZyteProxy("zyte-proxy-ca.cer")
 		client := &http.Client{
-			Transport: &http.Transport{
-				Proxy: http.ProxyURL(proxy),
-			},
+			Transport: zyte.GetHttpTransport(),
 		}
 	*/
 	resp, err := http.Get(url)
@@ -137,23 +134,26 @@ func (parser *Parser) getItemPriceFromAPI(itemArtc string) (float64, error) {
 // (secondary)
 func (parser *Parser) getSingleItemData(doc *goquery.Document) (*store.ItemData, error) {
 	available := true
-	selMain := doc.Find("div.productSelectors")
+	selMain := doc.Find("div.singleProductPage")
 
 	reg := regexp.MustCompile(`[[:^ascii:]]`)
 
 	label := strings.ReplaceAll(
 		reg.ReplaceAllLiteralString(
 			strings.TrimSpace(
-				selMain.Find("h1").Contents().First().Text()), " "), "  ", " ")
+				selMain.Find("div.productSelectors>h1").Contents().First().Text()), " "), "  ", " ")
 	if label == "" {
 		return nil, errors.New("label not found")
 	}
 
-	descript := "None"
-	artc, exist := selMain.Find("div.glyphs_html_container").Attr("data-partnumber")
+	descript := "None" // secondary items without a description
+
+	// artc, exist := selMain.Find("div.glyphs_html_container").Attr("data-partnumber")
+	artc, exist := selMain.Find("input").Last().Attr("data-partnumbers")
 	if !exist {
-		return nil, errors.New("internal error")
+		return nil, errors.New("article not found")
 	}
+	artc = strings.Split(artc, ",")[0] // temporarily
 
 	manufact := ""
 	doc.Find(".spec_table").Find("tr").EachWithBreak(
@@ -168,7 +168,7 @@ func (parser *Parser) getSingleItemData(doc *goquery.Document) (*store.ItemData,
 			return true
 		})
 	if manufact == "" {
-		return nil, errors.New("manufacturer not found")
+		manufact = "None" // temporarily
 	}
 	manufact = strings.Join([]string{manufact, artc}, " ")
 
@@ -209,20 +209,17 @@ func (parser *Parser) getSingleItemData(doc *goquery.Document) (*store.ItemData,
 		if artc == "" {
 			return nil, errors.New("article not found")
 		}
-
 	*/
 	created := getCurrentTimeUTC()
 	data := &store.ItemData{
-		Brand:   strings.Title(parser.Brand.Name),
-		Article: artc,
-		Info: store.Info{
-			Label:        label,
-			Description:  descript,
-			Manufacturer: manufact,
-			Price:        price,
-			Available:    available,
-			CreatedAt:    created,
-		},
+		Brand:        strings.Title(parser.Brand.Name),
+		Article:      artc,
+		Label:        label,
+		Description:  descript,
+		Manufacturer: manufact,
+		Price:        price,
+		Available:    available,
+		CreatedAt:    created,
 	}
 	return data, nil
 }
@@ -243,13 +240,13 @@ func (parser *Parser) getItemData(doc *goquery.Document) (*store.ItemData, []str
 				}
 			})
 		if len(buffer) == 0 {
-			return nil, nil, errors.New("not found urls")
+			return nil, nil, errors.New("not found internal urls")
 		}
 		return nil, buffer, nil
 	}
 
 	// single (secondary) item
-	singlepage := doc.Find("div.productSelectors") // ?
+	singlepage := doc.Find("div.productSelectors")
 	if singlepage.Nodes != nil {
 		data, err := parser.getSingleItemData(doc)
 		if err != nil {
@@ -284,7 +281,7 @@ func (parser *Parser) getItemData(doc *goquery.Document) (*store.ItemData, []str
 				selDescAndMan.Find("div").First().Contents().Text()), "")
 	}
 	if descript == "" {
-		descript = "none" // some items without a description
+		descript = "None" // some items without a description
 	}
 
 	// default & kit item
@@ -294,7 +291,6 @@ func (parser *Parser) getItemData(doc *goquery.Document) (*store.ItemData, []str
 				strings.ReplaceAll(
 					selDescAndMan.Find("p:nth-of-type(2), p:nth-of-type(3)").
 						Contents().Text(), "Manufacturer:", ""), "")), "  ", " ")
-
 	if manufact == "" {
 		return nil, nil, errors.New("manufacturer not found")
 	}
@@ -320,16 +316,14 @@ func (parser *Parser) getItemData(doc *goquery.Document) (*store.ItemData, []str
 
 	created := getCurrentTimeUTC()
 	data := &store.ItemData{
-		Brand:   strings.Title(parser.Brand.Name),
-		Article: artc,
-		Info: store.Info{
-			Label:        label,
-			Description:  descript,
-			Manufacturer: manufact,
-			Price:        price,
-			Available:    available,
-			CreatedAt:    created,
-		},
+		Brand:        strings.Title(parser.Brand.Name),
+		Article:      artc,
+		Label:        label,
+		Description:  descript,
+		Manufacturer: manufact,
+		Price:        price,
+		Available:    available,
+		CreatedAt:    created,
 	}
 	return data, nil, nil
 }
@@ -345,15 +339,13 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 	}
 	chanPagesDoc := make(chan *goquery.Document, pageCount)
 	defer close(chanPagesDoc)
-	chanErr := make(chan error)
-	defer close(chanErr)
 	go func() {
-		for i := 1; i <= pageCount; i++ {
+		// pageCount
+		for i := 1; i <= 1; i++ {
 			go func(num int) {
 				currentPageDoc, err := parser.getPageDocument(parser.Brand, num)
 				if err != nil {
-					chanErr <- err
-					return
+					log.Fatal(err)
 				}
 				chanPagesDoc <- currentPageDoc
 			}(i)
@@ -366,8 +358,7 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 			go func(doc *goquery.Document) {
 				itemsUrl, err := parser.getItemsUrl(doc)
 				if err != nil {
-					chanErr <- err
-					return
+					log.Fatal(err)
 				}
 				chanItemsUrl <- itemsUrl
 			}(pagesDoc)
@@ -381,8 +372,7 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 				for _, currentItemUrl := range urls {
 					currentItemDoc, err := parser.getItemDocument(currentItemUrl)
 					if err != nil {
-						chanErr <- err
-						return
+						log.Fatal(err)
 					}
 					chanItemsDoc <- currentItemDoc
 				}
@@ -398,8 +388,7 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 			go func(doc *goquery.Document) {
 				data, multipleItemsUrl, err := parser.getItemData(doc)
 				if err != nil {
-					chanErr <- err
-					return
+					log.Fatal(err)
 				}
 				if len(multipleItemsUrl) != 0 {
 					chanInternalUrls <- multipleItemsUrl
@@ -417,8 +406,7 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 				for _, internalItemUrl := range urls {
 					internalItemDoc, err := parser.getItemDocument(internalItemUrl)
 					if err != nil {
-						chanErr <- err
-						return
+						log.Fatal(err)
 					}
 					chanInternalDocs <- internalItemDoc
 				}
@@ -430,24 +418,34 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 			go func(doc *goquery.Document) {
 				data, _, err := parser.getItemData(doc)
 				if err != nil {
-					chanErr <- err
-					return
+					log.Fatal(err)
 				}
 				chanItemsData <- data
 			}(internalDoc)
 		}
 	}()
+
 	// form items batch
 	itemsBatch := make([]*store.ItemData, 0)
 	for {
-		for i := 0; i < 10 || len(chanItemsData) != 0; i++ {
-			itemsBatch = append(itemsBatch, <-chanItemsData)
-		}
-		if err := client.WriteBatch(itemsBatch); err != nil {
-			chanErr <- err
-			return
-		}
+		/*
+			for i := 0; i < 25 || len(chanItemsData) != 0; i++ {
+				addItem := <-chanItemsData
+				if !common.BatchContains(itemsBatch, addItem) {
+					itemsBatch = append(itemsBatch, addItem)
+				} else {
+					i--
+					continue
+				}
+			}
+		*/
 		// console out
-		common.PrettyPrint(itemsBatch)
+		common.PrettyPrint(<-chanItemsData)
+		/*
+			if err := client.WriteBatch(itemsBatch); err != nil {
+				log.Fatal(err)
+			}
+		*/
+		itemsBatch = itemsBatch[:0]
 	}
 }
