@@ -28,9 +28,7 @@ func main() {
 			CreatedAt:    time.Now().UTC().String(),
 		}
 	*/
-	storeCfg := store.NewConfig()
-	storeClient := store.NewClient(storeCfg)
-
+	storeClient := store.NewClient(store.NewConfig())
 	timeStart := time.Now()
 	brandTags := []parser.Brand{
 		{
@@ -54,12 +52,12 @@ func main() {
 			Code: "K8HKQ3DV",
 		},
 	}
-	newParser := parser.NewParser(brandTags[1])
+	brandParser := parser.NewParser(brandTags[1])
 	/*
-		if _, err := newParser.GetHtmlDocument("https://example.com/"); err != nil {
+		if _, err := brandParser.GetHtmlDocument("https://example.com/"); err != nil {
 			log.Fatal(err)
 		}
 	*/
-	newParser.FisherSciencific(storeClient)
+	brandParser.FisherSciencific(storeClient)
 	fmt.Println(time.Since(timeStart))
 }

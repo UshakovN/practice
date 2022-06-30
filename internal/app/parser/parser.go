@@ -81,7 +81,7 @@ func (parser *Parser) getItemDocument(item string) (*goquery.Document, error) {
 
 func (parser *Parser) GetHtmlDocument(url string) (*goquery.Document, error) {
 	/*
-		zyte := proxy.NewZyteProxy("C:/Users/User/Desktop/zyte-proxy-ca.cer")
+		zyte := proxy.NewZyteProxy(os.Getenv("PROXY_CERT_PATH"))
 		client := &http.Client{
 			Transport: zyte.GetHttpTransport(),
 		}
@@ -505,20 +505,23 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 
 	// form items batch
 	itemsBatch := make([]*store.ItemData, 0)
-	i := 0
+	batchSize := 0
 	for itemData := range chanItemsData {
-		i++
-		itemsBatch = append(itemsBatch, itemData)
-		if i == 25 {
+		if !common.BatchContains(itemsBatch, itemData) {
+			batchSize++
+			itemsBatch = append(itemsBatch, itemData)
+		}
+		if batchSize == 25 {
 			common.PrettyPrint(itemsBatch)
 			if err := client.WriteBatch(itemsBatch); err != nil {
 				log.Fatal(err)
 			}
 			itemsBatch = itemsBatch[:0]
-			i = 0
+			batchSize = 0
 		}
 	}
-	if i > 0 {
+	if batchSize > 0 {
 		common.PrettyPrint(itemsBatch)
 	}
+	log.Println("parse complete")
 }

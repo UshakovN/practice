@@ -7,6 +7,8 @@ require (
 	github.com/buger/jsonparser v1.1.1
 )
 
+require github.com/gorilla/mux v1.8.0 // indirect
+
 require (
 	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.16.5
