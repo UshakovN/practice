@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -10,12 +11,18 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/UshakovN/practice/internal/app/common"
 	"github.com/UshakovN/practice/internal/app/store"
 	json "github.com/buger/jsonparser"
+	"golang.org/x/sync/semaphore"
+)
+
+var (
+	MAX_GOROUTINES = 5
 )
 
 type Parser struct {
@@ -74,7 +81,7 @@ func (parser *Parser) getItemDocument(item string) (*goquery.Document, error) {
 
 func (parser *Parser) GetHtmlDocument(url string) (*goquery.Document, error) {
 	/*
-		zyte := proxy.NewZyteProxy("zyte-proxy-ca.cer")
+		zyte := proxy.NewZyteProxy("C:/Users/User/Desktop/zyte-proxy-ca.cer")
 		client := &http.Client{
 			Transport: zyte.GetHttpTransport(),
 		}
@@ -145,7 +152,6 @@ func (parser *Parser) getSingleItemData(doc *goquery.Document) (*store.ItemData,
 	if label == "" {
 		return nil, errors.New("label not found")
 	}
-
 	descript := "None" // secondary items without a description
 
 	// artc, exist := selMain.Find("div.glyphs_html_container").Attr("data-partnumber")
@@ -337,38 +343,76 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// sync running goroutines count
+	if pageCount < MAX_GOROUTINES {
+		MAX_GOROUTINES = pageCount
+	}
 	chanPagesDoc := make(chan *goquery.Document, pageCount)
-	defer close(chanPagesDoc)
-	go func() {
+	// defer close(chanPagesDoc)
+
+	semPages := semaphore.NewWeighted(int64(MAX_GOROUTINES))
+	// semPages := make(chan struct{}, MAX_GOROUTINES) // fixed running goroutines
+	var wgPagesDoc sync.WaitGroup
+	go func(wg *sync.WaitGroup) {
 		// pageCount
-		for i := 1; i <= 1; i++ {
-			go func(num int) {
+		for i := 1; i <= pageCount; i++ {
+			// semPages <- struct{}{} // add
+			if err := semPages.Acquire(context.TODO(), 1); err != nil {
+				log.Printf("Failed to acquire semaphore: %v", err)
+			}
+			wg.Add(1)
+			go func(num int, wg *sync.WaitGroup) {
 				currentPageDoc, err := parser.getPageDocument(parser.Brand, num)
 				if err != nil {
 					log.Fatal(err)
 				}
 				chanPagesDoc <- currentPageDoc
-			}(i)
+				// <-semPages // done
+				semPages.Release(1)
+				wg.Done()
+			}(i, wg)
 		}
-	}()
+		go func(wg *sync.WaitGroup) {
+			wg.Wait()
+			close(chanPagesDoc)
+		}(wg)
+	}(&wgPagesDoc)
+
 	chanItemsUrl := make(chan []string, pageCount)
-	defer close(chanItemsUrl)
-	go func() {
+	// defer close(chanItemsUrl)
+
+	var wgItemsUrl sync.WaitGroup
+	go func(wg *sync.WaitGroup) {
 		for pagesDoc := range chanPagesDoc {
-			go func(doc *goquery.Document) {
+			wg.Add(1)
+			go func(doc *goquery.Document, wg *sync.WaitGroup) {
 				itemsUrl, err := parser.getItemsUrl(doc)
 				if err != nil {
 					log.Fatal(err)
 				}
 				chanItemsUrl <- itemsUrl
-			}(pagesDoc)
+				wg.Done()
+			}(pagesDoc, wg)
 		}
-	}()
+		go func(wg *sync.WaitGroup) {
+			wg.Wait()
+			close(chanItemsUrl)
+		}(wg)
+	}(&wgItemsUrl)
 	chanItemsDoc := make(chan *goquery.Document, 30)
-	defer close(chanItemsDoc)
-	go func() {
+
+	semItems := semaphore.NewWeighted(int64(MAX_GOROUTINES))
+	// semItems := make(chan struct{}, MAX_GOROUTINES) // fixed running goroutines
+	// defer close(chanItemsDoc)
+	var wgItemsDoc sync.WaitGroup
+	go func(wg *sync.WaitGroup) {
 		for itemsUrl := range chanItemsUrl {
-			go func(urls []string) {
+			if err := semItems.Acquire(context.TODO(), 1); err != nil {
+				log.Printf("Failed to acquire semaphore: %v", err)
+			}
+			// semItems <- struct{}{} // add
+			wg.Add(1)
+			go func(urls []string, wg *sync.WaitGroup) {
 				for _, currentItemUrl := range urls {
 					currentItemDoc, err := parser.getItemDocument(currentItemUrl)
 					if err != nil {
@@ -376,16 +420,28 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 					}
 					chanItemsDoc <- currentItemDoc
 				}
-			}(itemsUrl)
+				// <-semItems // done
+				semItems.Release(1)
+				wg.Done()
+			}(itemsUrl, wg)
 		}
-	}()
+		go func(wg *sync.WaitGroup) {
+			wg.Wait()
+			close(chanItemsDoc)
+		}(wg)
+	}(&wgItemsDoc)
+
 	chanItemsData := make(chan *store.ItemData, 30)
-	defer close(chanItemsData)
+	// defer close(chanItemsData)
 	chanInternalUrls := make(chan []string, 30)
-	defer close(chanInternalUrls)
-	go func() {
+	// defer close(chanInternalUrls)
+
+	var wgItemsData, wgInternalUrls sync.WaitGroup
+	go func(wgItem, wgInternal *sync.WaitGroup) {
 		for itemDoc := range chanItemsDoc {
-			go func(doc *goquery.Document) {
+			wgItem.Add(1)
+			wgInternal.Add(1)
+			go func(doc *goquery.Document, wgItem *sync.WaitGroup, wgInternal *sync.WaitGroup) {
 				data, multipleItemsUrl, err := parser.getItemData(doc)
 				if err != nil {
 					log.Fatal(err)
@@ -395,14 +451,23 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 				} else {
 					chanItemsData <- data
 				}
-			}(itemDoc)
+				wgItem.Done()
+				wgInternal.Done()
+			}(itemDoc, wgItem, wgInternal)
 		}
-	}()
+		go func(wgInternal *sync.WaitGroup) {
+			wgInternal.Wait()
+			close(chanInternalUrls)
+		}(wgInternal)
+	}(&wgItemsData, &wgInternalUrls)
+
 	chanInternalDocs := make(chan *goquery.Document, 30)
-	defer close(chanInternalDocs)
-	go func() {
+	// defer close(chanInternalDocs)
+	var wgInternalDocs sync.WaitGroup
+	go func(wg *sync.WaitGroup) {
 		for internalUrls := range chanInternalUrls {
-			go func(urls []string) {
+			wg.Add(1)
+			go func(urls []string, wg *sync.WaitGroup) {
 				for _, internalItemUrl := range urls {
 					internalItemDoc, err := parser.getItemDocument(internalItemUrl)
 					if err != nil {
@@ -410,42 +475,50 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 					}
 					chanInternalDocs <- internalItemDoc
 				}
-			}(internalUrls)
+				wg.Done()
+			}(internalUrls, wg)
 		}
-	}()
-	go func() {
+		go func(wg *sync.WaitGroup) {
+			wg.Wait()
+			close(chanInternalDocs)
+		}(wg)
+	}(&wgInternalDocs)
+
+	var wgItem sync.WaitGroup
+	go func(wg *sync.WaitGroup) {
 		for internalDoc := range chanInternalDocs {
+			wg.Add(1)
 			go func(doc *goquery.Document) {
 				data, _, err := parser.getItemData(doc)
 				if err != nil {
 					log.Fatal(err)
 				}
 				chanItemsData <- data
+				wg.Done()
 			}(internalDoc)
 		}
-	}()
+		go func(wg *sync.WaitGroup) {
+			wg.Wait()
+			close(chanItemsData)
+		}(wg)
+	}(&wgItem)
 
 	// form items batch
 	itemsBatch := make([]*store.ItemData, 0)
-	for {
-		/*
-			for i := 0; i < 25 || len(chanItemsData) != 0; i++ {
-				addItem := <-chanItemsData
-				if !common.BatchContains(itemsBatch, addItem) {
-					itemsBatch = append(itemsBatch, addItem)
-				} else {
-					i--
-					continue
-				}
-			}
-		*/
-		// console out
-		common.PrettyPrint(<-chanItemsData)
-		/*
+	i := 0
+	for itemData := range chanItemsData {
+		i++
+		itemsBatch = append(itemsBatch, itemData)
+		if i == 25 {
+			common.PrettyPrint(itemsBatch)
 			if err := client.WriteBatch(itemsBatch); err != nil {
 				log.Fatal(err)
 			}
-		*/
-		itemsBatch = itemsBatch[:0]
+			itemsBatch = itemsBatch[:0]
+			i = 0
+		}
+	}
+	if i > 0 {
+		common.PrettyPrint(itemsBatch)
 	}
 }

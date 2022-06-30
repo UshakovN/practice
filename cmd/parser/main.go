@@ -54,17 +54,12 @@ func main() {
 			Code: "K8HKQ3DV",
 		},
 	}
-	newParser := parser.NewParser(brandTags[4])
-
+	newParser := parser.NewParser(brandTags[1])
 	/*
 		if _, err := newParser.GetHtmlDocument("https://example.com/"); err != nil {
 			log.Fatal(err)
 		}
 	*/
-
 	newParser.FisherSciencific(storeClient)
-
-	// newParser.Test(storeClient)
-
 	fmt.Println(time.Since(timeStart))
 }
