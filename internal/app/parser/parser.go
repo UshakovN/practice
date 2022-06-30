@@ -347,6 +347,10 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 	if pageCount < MAX_GOROUTINES {
 		MAX_GOROUTINES = pageCount
 	}
+
+	// error logging
+	chanError := make(chan error)
+
 	chanPagesDoc := make(chan *goquery.Document, pageCount)
 	// defer close(chanPagesDoc)
 
@@ -355,7 +359,7 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 	var wgPagesDoc sync.WaitGroup
 	go func(wg *sync.WaitGroup) {
 		// pageCount
-		for i := 1; i <= pageCount; i++ {
+		for i := 1; i <= 1; i++ {
 			// semPages <- struct{}{} // add
 			if err := semPages.Acquire(context.TODO(), 1); err != nil {
 				log.Printf("Failed to acquire semaphore: %v", err)
@@ -364,7 +368,7 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 			go func(num int, wg *sync.WaitGroup) {
 				currentPageDoc, err := parser.getPageDocument(parser.Brand, num)
 				if err != nil {
-					log.Fatal(err)
+					chanError <- err
 				}
 				chanPagesDoc <- currentPageDoc
 				// <-semPages // done
@@ -388,7 +392,7 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 			go func(doc *goquery.Document, wg *sync.WaitGroup) {
 				itemsUrl, err := parser.getItemsUrl(doc)
 				if err != nil {
-					log.Fatal(err)
+					chanError <- err
 				}
 				chanItemsUrl <- itemsUrl
 				wg.Done()
@@ -416,7 +420,7 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 				for _, currentItemUrl := range urls {
 					currentItemDoc, err := parser.getItemDocument(currentItemUrl)
 					if err != nil {
-						log.Fatal(err)
+						chanError <- err
 					}
 					chanItemsDoc <- currentItemDoc
 				}
@@ -444,7 +448,7 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 			go func(doc *goquery.Document, wgItem *sync.WaitGroup, wgInternal *sync.WaitGroup) {
 				data, multipleItemsUrl, err := parser.getItemData(doc)
 				if err != nil {
-					log.Fatal(err)
+					chanError <- err
 				}
 				if len(multipleItemsUrl) != 0 {
 					chanInternalUrls <- multipleItemsUrl
@@ -471,7 +475,7 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 				for _, internalItemUrl := range urls {
 					internalItemDoc, err := parser.getItemDocument(internalItemUrl)
 					if err != nil {
-						log.Fatal(err)
+						chanError <- err
 					}
 					chanInternalDocs <- internalItemDoc
 				}
@@ -491,7 +495,7 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 			go func(doc *goquery.Document) {
 				data, _, err := parser.getItemData(doc)
 				if err != nil {
-					log.Fatal(err)
+					chanError <- err
 				}
 				chanItemsData <- data
 				wg.Done()
@@ -506,22 +510,57 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 	// form items batch
 	itemsBatch := make([]*store.ItemData, 0)
 	batchSize := 0
-	for itemData := range chanItemsData {
-		if !common.BatchContains(itemsBatch, itemData) {
-			batchSize++
-			itemsBatch = append(itemsBatch, itemData)
-		}
-		if batchSize == 25 {
-			common.PrettyPrint(itemsBatch)
-			if err := client.WriteBatch(itemsBatch); err != nil {
-				log.Fatal(err)
+
+loop:
+	for {
+		select {
+		case itemData, ok := <-chanItemsData:
+			if !ok {
+				close(chanError)
+				break loop
 			}
-			itemsBatch = itemsBatch[:0]
-			batchSize = 0
+			if !common.BatchContains(itemsBatch, itemData) {
+				batchSize++
+				itemsBatch = append(itemsBatch, itemData)
+			}
+			if batchSize == 25 {
+				log.Println("print batch")
+				// common.PrettyPrint(itemsBatch)
+				/*
+					if err := client.WriteBatch(itemsBatch); err != nil {
+						chanError <- err
+					}
+				*/
+				itemsBatch = itemsBatch[:0]
+				batchSize = 0
+			}
+		case err := <-chanError:
+			log.Println(err)
 		}
 	}
 	if batchSize > 0 {
-		common.PrettyPrint(itemsBatch)
+		// common.PrettyPrint(itemsBatch)
+		log.Println("print batch")
 	}
 	log.Println("parse complete")
+	/*
+		for itemData := range chanItemsData {
+			if !common.BatchContains(itemsBatch, itemData) {
+				batchSize++
+				itemsBatch = append(itemsBatch, itemData)
+			}
+			if batchSize == 25 {
+				common.PrettyPrint(itemsBatch)
+				if err := client.WriteBatch(itemsBatch); err != nil {
+					chanError <- err
+				}
+				itemsBatch = itemsBatch[:0]
+				batchSize = 0
+			}
+		}
+		if batchSize > 0 {
+			common.PrettyPrint(itemsBatch)
+		}
+		log.Println("parse complete")
+	*/
 }

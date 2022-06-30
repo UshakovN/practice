@@ -51,8 +51,12 @@ func main() {
 			Name: "dwk-life-sciences",
 			Code: "K8HKQ3DV",
 		},
+		{
+			Name: "bd-biosciences",
+			Code: "I9C8LSLG",
+		},
 	}
-	brandParser := parser.NewParser(brandTags[1])
+	brandParser := parser.NewParser(brandTags[5])
 	/*
 		if _, err := brandParser.GetHtmlDocument("https://example.com/"); err != nil {
 			log.Fatal(err)
