@@ -21,8 +21,9 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-var (
-	MAX_GOROUTINES = 5
+const (
+	RESOURCE_URL       = "https://www.fishersci.com"
+	MAX_GOROUTINES_PGS = 5
 )
 
 type Parser struct {
@@ -44,8 +45,13 @@ func NewParser(brand Brand) *Parser {
 }
 
 func (parser *Parser) getPagesCount(doc *goquery.Document) (int, error) {
-	pages, exist := doc.Find("div.node-pagination").
-		Find("li").Last().Prev().Find("a").Attr("href")
+
+	pagination := doc.Find("div.node-pagination")
+	if pagination.Nodes == nil { // onepages / tables
+		return 1, nil
+	}
+
+	pages, exist := pagination.Find("li").Last().Prev().Find("a").Attr("href")
 	// doc.Find("li.hide_in_mobile").Last().Find("a").Attr("href")
 	if !exist {
 		return 0, errors.New("not found pages")
@@ -55,6 +61,39 @@ func (parser *Parser) getPagesCount(doc *goquery.Document) (int, error) {
 
 func (parser *Parser) getItemsUrl(doc *goquery.Document) ([]string, error) {
 	buffer := make([]string, 0)
+
+	// brands with tables (brand navigator form)
+	brandNavigator := doc.Find("nav.brand-navigation")
+	itemsTableUrl := ""
+	if brandNavigator.Nodes != nil {
+		brandNavigator.Find("ul>li").EachWithBreak(
+			func(index int, item *goquery.Selection) bool {
+				aContent := item.Find("a")
+				if aContent.Contents().Text() == "Products" {
+					itemsTableUrl, _ = aContent.Attr("href")
+					return false
+				}
+				return true
+			})
+
+		if itemsTableUrl != "" {
+			itemsTable, err := parser.getItemDocument(itemsTableUrl)
+			if err != nil {
+				return nil, err
+			}
+			itemsTable.Find("div.tabs_wrap").Find("div.tab").Each(
+				func(index int, item *goquery.Selection) {
+					item.Find("table.general_table.product_table").Find("tbody").Each(
+						func(i int, s *goquery.Selection) {
+							itemUrl, exist := s.Find("div>a").Attr("href")
+							if exist {
+								buffer = append(buffer, strings.TrimSpace(itemUrl))
+							}
+						})
+				})
+		}
+	}
+
 	doc.Find("div.search_results>div.search_results_listing>div.row.search_result_item").Each(
 		func(index int, item *goquery.Selection) {
 			url, exist := item.Find("div.columns>div.block>a").Attr("href")
@@ -62,8 +101,9 @@ func (parser *Parser) getItemsUrl(doc *goquery.Document) ([]string, error) {
 				buffer = append(buffer, strings.TrimSpace(url))
 			}
 		})
+
 	if len(buffer) == 0 {
-		return nil, errors.New("not found urls") // DEBUG
+		return nil, errors.New("not found item urls") // DEBUG
 	}
 	return buffer, nil
 }
@@ -75,7 +115,7 @@ func (parser *Parser) getPageDocument(brand Brand, page int) (*goquery.Document,
 }
 
 func (parser *Parser) getItemDocument(item string) (*goquery.Document, error) {
-	url := fmt.Sprintf("https://www.fishersci.com%s", item)
+	url := fmt.Sprintf("%s%s", RESOURCE_URL, item)
 	return parser.GetHtmlDocument(url)
 }
 
@@ -106,7 +146,7 @@ func getCurrentTimeUTC() string {
 }
 
 func (parser *Parser) getItemPriceFromAPI(itemArtc string) (float64, error) {
-	url := "https://www.fishersci.com/shop/products/service/pricing"
+	url := fmt.Sprintf("%s/shop/products/service/pricing", RESOURCE_URL)
 	resp, err := http.PostForm(url, neturl.Values{"partNumber": {itemArtc}})
 	if err != nil {
 		return 0, err
@@ -335,6 +375,8 @@ func (parser *Parser) getItemData(doc *goquery.Document) (*store.ItemData, []str
 }
 
 func (parser *Parser) FisherSciencific(client *store.Client) {
+	MAX_GOROUTINES_ITMS := MAX_GOROUTINES_PGS
+
 	currentPageDoc, err := parser.getPageDocument(parser.Brand, 0)
 	if err != nil {
 		log.Fatal(err)
@@ -344,22 +386,21 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 		log.Fatal(err)
 	}
 	// sync running goroutines count
-	if pageCount < MAX_GOROUTINES {
-		MAX_GOROUTINES = pageCount
+	if pageCount < MAX_GOROUTINES_PGS {
+		MAX_GOROUTINES_ITMS = pageCount
 	}
 
 	// error logging
-	chanError := make(chan error)
+	chanError := make(chan error, 30)
 
 	chanPagesDoc := make(chan *goquery.Document, pageCount)
-	// defer close(chanPagesDoc)
 
-	semPages := semaphore.NewWeighted(int64(MAX_GOROUTINES))
-	// semPages := make(chan struct{}, MAX_GOROUTINES) // fixed running goroutines
+	semPages := semaphore.NewWeighted(int64(MAX_GOROUTINES_PGS))
+	// semPages := make(chan struct{}, MAX_GOROUTINES_PGS) // fixed running goroutines
 	var wgPagesDoc sync.WaitGroup
 	go func(wg *sync.WaitGroup) {
 		// pageCount
-		for i := 1; i <= 1; i++ {
+		for i := 1; i <= pageCount; i++ {
 			// semPages <- struct{}{} // add
 			if err := semPages.Acquire(context.TODO(), 1); err != nil {
 				log.Printf("Failed to acquire semaphore: %v", err)
@@ -383,7 +424,6 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 	}(&wgPagesDoc)
 
 	chanItemsUrl := make(chan []string, pageCount)
-	// defer close(chanItemsUrl)
 
 	var wgItemsUrl sync.WaitGroup
 	go func(wg *sync.WaitGroup) {
@@ -405,9 +445,8 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 	}(&wgItemsUrl)
 	chanItemsDoc := make(chan *goquery.Document, 30)
 
-	semItems := semaphore.NewWeighted(int64(MAX_GOROUTINES))
-	// semItems := make(chan struct{}, MAX_GOROUTINES) // fixed running goroutines
-	// defer close(chanItemsDoc)
+	semItems := semaphore.NewWeighted(int64(MAX_GOROUTINES_ITMS))
+	// semItems := make(chan struct{}, MAX_GOROUTINES_PGS) // fixed running goroutines
 	var wgItemsDoc sync.WaitGroup
 	go func(wg *sync.WaitGroup) {
 		for itemsUrl := range chanItemsUrl {
@@ -436,9 +475,7 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 	}(&wgItemsDoc)
 
 	chanItemsData := make(chan *store.ItemData, 30)
-	// defer close(chanItemsData)
 	chanInternalUrls := make(chan []string, 30)
-	// defer close(chanInternalUrls)
 
 	var wgItemsData, wgInternalUrls sync.WaitGroup
 	go func(wgItem, wgInternal *sync.WaitGroup) {
@@ -466,7 +503,7 @@ func (parser *Parser) FisherSciencific(client *store.Client) {
 	}(&wgItemsData, &wgInternalUrls)
 
 	chanInternalDocs := make(chan *goquery.Document, 30)
-	// defer close(chanInternalDocs)
+
 	var wgInternalDocs sync.WaitGroup
 	go func(wg *sync.WaitGroup) {
 		for internalUrls := range chanInternalUrls {
@@ -519,13 +556,14 @@ loop:
 				close(chanError)
 				break loop
 			}
+			// common.PrettyPrint(itemData)
+
 			if !common.BatchContains(itemsBatch, itemData) {
 				batchSize++
 				itemsBatch = append(itemsBatch, itemData)
 			}
 			if batchSize == 25 {
-				log.Println("print batch")
-				// common.PrettyPrint(itemsBatch)
+				common.PrettyPrint(itemsBatch)
 				/*
 					if err := client.WriteBatch(itemsBatch); err != nil {
 						chanError <- err
@@ -534,13 +572,13 @@ loop:
 				itemsBatch = itemsBatch[:0]
 				batchSize = 0
 			}
+
 		case err := <-chanError:
 			log.Println(err)
 		}
 	}
 	if batchSize > 0 {
-		// common.PrettyPrint(itemsBatch)
-		log.Println("print batch")
+		common.PrettyPrint(itemsBatch)
 	}
 	log.Println("parse complete")
 	/*

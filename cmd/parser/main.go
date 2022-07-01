@@ -55,6 +55,10 @@ func main() {
 			Name: "bd-biosciences",
 			Code: "I9C8LSLG",
 		},
+		{
+			Name: "bio-tek-instruments",
+			Code: "KWWCPCHY",
+		},
 	}
 	brandParser := parser.NewParser(brandTags[5])
 	/*
