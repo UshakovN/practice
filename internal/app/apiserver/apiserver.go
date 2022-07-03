@@ -30,7 +30,7 @@ func (server *APIServer) Start() error {
 }
 
 func (server *APIServer) configureRouter() {
-	server.router.HandleFunc("/parsebrand", server.handleParseBrand()).Methods(http.MethodGet)
+	server.router.HandleFunc("/parsebrand", server.handleParseBrand()).Methods(http.MethodPost)
 	server.router.HandleFunc("/", server.handleStart())
 }
 

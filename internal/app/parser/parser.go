@@ -377,21 +377,21 @@ func (parser *Parser) getItemData(doc *goquery.Document) (*store.ItemData, []str
 func (parser *Parser) FisherSciencific(client *store.Client) {
 	MAX_GOROUTINES_ITMS := MAX_GOROUTINES_PGS
 
+	// error logging
+	chanError := make(chan error, 30)
+
 	currentPageDoc, err := parser.getPageDocument(parser.Brand, 0)
 	if err != nil {
-		log.Fatal(err)
+		chanError <- err
 	}
 	pageCount, err := parser.getPagesCount(currentPageDoc)
 	if err != nil {
-		log.Fatal(err)
+		chanError <- err
 	}
 	// sync running goroutines count
 	if pageCount < MAX_GOROUTINES_PGS {
 		MAX_GOROUTINES_ITMS = pageCount
 	}
-
-	// error logging
-	chanError := make(chan error, 30)
 
 	chanPagesDoc := make(chan *goquery.Document, pageCount)
 
