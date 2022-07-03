@@ -1,4 +1,4 @@
 .vscode/
-parser.exe
-launch.json
-zyte-proxy-ca.cer
+*.exe
+*.json
+*.cer

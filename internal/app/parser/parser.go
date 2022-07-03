@@ -564,11 +564,10 @@ loop:
 			}
 			if batchSize == 25 {
 				common.PrettyPrint(itemsBatch)
-				/*
-					if err := client.WriteBatch(itemsBatch); err != nil {
-						chanError <- err
-					}
-				*/
+				if err := client.WriteBatch(itemsBatch); err != nil {
+					chanError <- err
+				}
+				log.Println("batch sent")
 				itemsBatch = itemsBatch[:0]
 				batchSize = 0
 			}

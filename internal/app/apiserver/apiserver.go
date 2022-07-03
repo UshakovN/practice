@@ -36,7 +36,7 @@ func (server *APIServer) configureRouter() {
 
 func (server *APIServer) handleStart() http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
-		rw.Write([]byte("Start"))
+		rw.Write([]byte("start"))
 	}
 }
 
